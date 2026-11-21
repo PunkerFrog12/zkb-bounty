@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="h3">Most wanted</h1>
+<p class="text-body-secondary">Search any character to place or add to a bounty. Minimum {{ settings.min_bounty_isk | isk }} ISK.</p>
+<table class="table table-sm">
+  <thead><tr><th>Target</th><th class="text-end">Remaining pool (ISK)</th><th class="text-end">Total placed</th></tr></thead>
+  <tbody>
+  {% for b in bounties %}
+    <tr>
+      <td><img src="https://images.evetech.net/characters/{{ b.target_character_id }}/portrait?size=32" width="32" height="32" alt="">
+          <a href="/character/{{ b.target_character_id }}">{{ b.target_name }}</a></td>
+      <td class="text-end">{{ b.remaining_pool_isk | isk }}</td>
+      <td class="text-end">{{ b.total_pool_isk | isk }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="3">No active bounties yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

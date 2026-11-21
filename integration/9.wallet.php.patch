@@ -1,0 +1,19 @@
+Only needed if zKillboard uses its EXISTING donation character ($adminCharacter) as the
+bounty receiving character. Without it, cron/9.wallet.php would also turn a bounty deposit
+into ad-free months (double use of the same ISK). With a dedicated bounty character, skip this.
+Diff against zKillboard/zKillboard@c39f299 (2026-11-17).
+
+--- a/cron/9.wallet.php
++++ b/cron/9.wallet.php
+@@ -66,6 +66,11 @@ function applyBalances()
+         if ($row['ownerID2'] != $adminCharacter && $row['ownerID2'] != 98207592) {
+             continue;
+         }
++        if (stripos((string) @$row['reason'], 'BNTY-') !== false) {
++            // Bounty deposit: credited by the zkb-bounty service, not ad-free time.
++            $mdb->set('payments', $row, ['paymentApplied' => 1, 'months' => 'bounty deposit']);
++            continue;
++        }
+
+         $date = $row['date'];
+         $time = strtotime($date);

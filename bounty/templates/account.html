@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Account{% endblock %}
+{% block content %}
+<h1 class="h3">{{ user.character_name }}</h1>
+<div class="row g-3 mb-4">
+  <div class="col-md-5"><div class="card"><div class="card-body">
+    <div class="text-body-secondary">Bounty balance</div>
+    <div class="display-6">{{ user.wallet_balance | isk }} ISK</div>
+  </div></div></div>
+  <div class="col-md-7"><div class="card"><div class="card-body">
+    <h2 class="h5">Deposit ISK</h2>
+    <ol class="mb-0">
+      <li>In game, right-click <strong>character {{ settings.receiving_character_id }}</strong> (<a href="https://zkillboard.com/character/{{ settings.receiving_character_id }}/">profile</a>) and choose <em>Give Money</em>.</li>
+      <li>Put this code in the <em>Reason</em> field: <code class="fs-5">{{ user.deposit_code }}</code></li>
+      <li>Your balance updates within about an hour (ESI caches the wallet journal).</li>
+    </ol>
+  </div></div></div>
+</div>
+
+<h2 class="h5">Deposits</h2>
+<table class="table table-sm mb-4"><tbody>
+{% for d in deposits %}<tr><td>{{ d.journal_date.strftime('%Y-%m-%d %H:%M') }}</td><td class="text-end">{{ d.amount_isk | isk }} ISK</td></tr>
+{% else %}<tr><td>No deposits yet.</td></tr>{% endfor %}
+</tbody></table>
+
+<h2 class="h5">Bounties you placed</h2>
+<table class="table table-sm mb-4"><tbody>
+{% for c, name, tid in placed %}<tr><td><a href="/character/{{ tid }}">{{ name }}</a>{% if c.anonymous %} <span class="badge text-bg-secondary">anonymous</span>{% endif %}</td><td class="text-end">{{ c.amount_isk | isk }} ISK</td></tr>
+{% else %}<tr><td>None.</td></tr>{% endfor %}
+</tbody></table>
+
+<h2 class="h5">Bounties you earned</h2>
+<table class="table table-sm"><tbody>
+{% for c in won %}<tr><td><a href="https://zkillboard.com/kill/{{ c.killmail_id }}/">kill {{ c.killmail_id }}</a></td><td class="text-end">{{ c.net_payout | isk }} ISK</td><td>{{ c.status }}</td></tr>
+{% else %}<tr><td>None yet - go hunting.</td></tr>{% endfor %}
+</tbody></table>
+{% endblock %}

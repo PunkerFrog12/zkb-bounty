@@ -1,0 +1,21 @@
+<!--
+  Optional: drop into zKillboard's character page template to show the bounty pool and a
+  "Place bounty" link. Assumes the service is reverse-proxied at https://zkillboard.com/bounties/
+  (see README "Deploying next to zKillboard"). One cached GET per page view (Cache-Control 60s).
+-->
+<span id="zkb-bounty-badge" data-character-id="{{ characterID }}"></span>
+<script>
+(function () {
+  var el = document.getElementById('zkb-bounty-badge');
+  var id = el.getAttribute('data-character-id');
+  fetch('/bounties/api/bounty/' + id).then(function (r) { return r.json(); }).then(function (b) {
+    var a = document.createElement('a');
+    a.href = '/bounties/character/' + id;
+    a.className = b.active ? 'badge text-bg-danger' : 'badge text-bg-secondary';
+    a.textContent = b.active
+      ? 'Bounty: ' + Number(b.remaining_pool_isk).toLocaleString() + ' ISK'
+      : 'Place bounty';
+    el.appendChild(a);
+  }).catch(function () {});
+})();
+</script>
