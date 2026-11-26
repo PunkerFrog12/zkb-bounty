@@ -71,15 +71,19 @@ class Claim(Base):
     gross_payout: Mapped[int] = mapped_column(BigInteger)
     host_fee_isk: Mapped[int] = mapped_column(BigInteger)
     net_payout: Mapped[int] = mapped_column(BigInteger)
-    status: Mapped[str] = mapped_column(String(16), default="PENDING_PAYMENT")  # | PAID
+    status: Mapped[str] = mapped_column(String(16), default="PENDING_PAYMENT")  # | PAID | REJECTED
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # Anti-farming hold: the claim cannot be marked paid before this time.
+    payable_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    rejected_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejected_by_character_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     paid_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     paid_by_character_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     payout_journal_ref_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True)
     __table_args__ = (
         CheckConstraint("gross_payout = host_fee_isk + net_payout", name="ck_claim_sum"),
         CheckConstraint("net_payout > 0 AND host_fee_isk >= 0", name="ck_claim_positive"),
-        CheckConstraint("status IN ('PENDING_PAYMENT','PAID')", name="ck_claim_status"),
+        CheckConstraint("status IN ('PENDING_PAYMENT','PAID','REJECTED')", name="ck_claim_status"),
     )
 
 

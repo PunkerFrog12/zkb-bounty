@@ -59,8 +59,8 @@ CREATE TABLE bounty_contributions (
 	FOREIGN KEY(bounty_id) REFERENCES bounties (id), 
 	FOREIGN KEY(placer_character_id) REFERENCES users (character_id)
 );
-CREATE INDEX ix_bounty_contributions_placer_character_id ON bounty_contributions (placer_character_id);
 CREATE INDEX ix_bounty_contributions_bounty_id ON bounty_contributions (bounty_id);
+CREATE INDEX ix_bounty_contributions_placer_character_id ON bounty_contributions (placer_character_id);
 
 CREATE TABLE claims (
 	id SERIAL NOT NULL, 
@@ -74,13 +74,16 @@ CREATE TABLE claims (
 	net_payout BIGINT NOT NULL, 
 	status VARCHAR(16) NOT NULL, 
 	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	payable_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	rejected_at TIMESTAMP WITH TIME ZONE, 
+	rejected_by_character_id BIGINT, 
 	paid_at TIMESTAMP WITH TIME ZONE, 
 	paid_by_character_id BIGINT, 
 	payout_journal_ref_id BIGINT, 
 	PRIMARY KEY (id), 
 	CONSTRAINT ck_claim_sum CHECK (gross_payout = host_fee_isk + net_payout), 
 	CONSTRAINT ck_claim_positive CHECK (net_payout > 0 AND host_fee_isk >= 0), 
-	CONSTRAINT ck_claim_status CHECK (status IN ('PENDING_PAYMENT','PAID')), 
+	CONSTRAINT ck_claim_status CHECK (status IN ('PENDING_PAYMENT','PAID','REJECTED')), 
 	FOREIGN KEY(bounty_id) REFERENCES bounties (id), 
 	UNIQUE (killmail_id), 
 	UNIQUE (payout_journal_ref_id)

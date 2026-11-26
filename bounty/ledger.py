@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import Settings
-from .killrules import KillDecision, decide, parse_time
+from .killrules import HunterCheck, KillDecision, decide, parse_time, victim_id
 from .models import Bounty, BountyContribution, Claim, Deposit, User, utcnow
 
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I ambiguity
@@ -186,16 +186,23 @@ def place_bounty(sm: sessionmaker, settings: Settings, placer_id: int, target_id
 Verifier = Callable[[KillDecision], bool]
 
 
+def _aware(t: dt.datetime) -> dt.datetime:
+    return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
+
+
 def process_killmail(sm: sessionmaker, settings: Settings, package: dict,
-                     verify: Verifier | None = None) -> Claim | None:
+                     verify: Verifier | None = None, hunter_ok: HunterCheck | None = None) -> Claim | None:
     """Turn one R2Z2 package into at most one claim. Safe to call repeatedly / concurrently."""
-    d = decide(package)
-    if not d.victim_character_id or d.killer_character_id is None:
+    target = victim_id(package)
+    if not target:
         return None
-    with sm() as s:  # cheap pre-check outside the write transaction
-        if s.scalar(select(Bounty.id).where(Bounty.target_character_id == d.victim_character_id,
+    with sm() as s:  # cheap pre-check before any network call or write transaction
+        if s.scalar(select(Bounty.id).where(Bounty.target_character_id == target,
                                             Bounty.status == "ACTIVE")) is None:
             return None
+    d = decide(package, hunter_ok)
+    if d.killer_character_id is None:
+        return None
     if verify is not None and not verify(d):
         return None
     try:
@@ -207,8 +214,7 @@ def process_killmail(sm: sessionmaker, settings: Settings, package: dict,
                 return None
             if s.scalar(select(Claim.id).where(Claim.killmail_id == d.killmail_id)) is not None:
                 return None  # already paid (R2Z2 re-sends re-processed kills)
-            created = bounty.created_at if bounty.created_at.tzinfo else bounty.created_at.replace(tzinfo=dt.timezone.utc)
-            if d.killmail_time < created:
+            if d.killmail_time < _aware(bounty.created_at):
                 return None  # kill predates this pool: no back-dated claims
             gross = gross_for_kill(bounty.remaining_pool_isk, d.isk_destroyed, settings.payout_ratio_percent)
             fee, net = split_fee(gross, settings.host_fee_permille)
@@ -225,7 +231,8 @@ def process_killmail(sm: sessionmaker, settings: Settings, package: dict,
                 bounty.status, bounty.depleted_at = "DEPLETED", utcnow()
             claim = Claim(bounty_id=bounty.id, killmail_id=d.killmail_id, killmail_hash=d.killmail_hash,
                           killmail_time=d.killmail_time, killer_character_id=d.killer_character_id,
-                          gross_payout=gross, host_fee_isk=fee, net_payout=net, status="PENDING_PAYMENT")
+                          gross_payout=gross, host_fee_isk=fee, net_payout=net, status="PENDING_PAYMENT",
+                          payable_at=utcnow() + dt.timedelta(hours=settings.claim_hold_hours))
             s.add(claim)
             s.flush()
             return claim
@@ -242,7 +249,30 @@ def pending_payouts(sm: sessionmaker) -> list[Claim]:
 
 def mark_paid(sm: sessionmaker, claim_id: int, admin_character_id: int) -> None:
     with sm.begin() as s:
-        n = s.execute(update(Claim).where(Claim.id == claim_id, Claim.status == "PENDING_PAYMENT")
-                      .values(status="PAID", paid_at=utcnow(), paid_by_character_id=admin_character_id)).rowcount
-        if n != 1:
-            raise BountyError("claim not found or already paid")
+        claim = s.get(Claim, claim_id, with_for_update=True)
+        if claim is None or claim.status != "PENDING_PAYMENT":
+            raise BountyError("claim not found or already settled")
+        if utcnow() < _aware(claim.payable_at):
+            raise BountyError(f"claim is on hold until {_aware(claim.payable_at):%Y-%m-%d %H:%M} UTC")
+        claim.status, claim.paid_at, claim.paid_by_character_id = "PAID", utcnow(), admin_character_id
+
+
+def reject_claim(sm: sessionmaker, claim_id: int, admin_character_id: int) -> None:
+    """Admin action for a farmed or bogus kill: cancel the claim and return its full gross to the pool."""
+    with sm.begin() as s:
+        claim = s.get(Claim, claim_id, with_for_update=True)
+        if claim is None or claim.status != "PENDING_PAYMENT":
+            raise BountyError("claim not found or already settled")
+        bounty = s.get(Bounty, claim.bounty_id, with_for_update=True)
+        if bounty.status == "DEPLETED":
+            newer = s.scalar(select(Bounty).where(Bounty.target_character_id == bounty.target_character_id,
+                                                  Bounty.status == "ACTIVE").with_for_update())
+            if newer is not None:  # a new pool opened meanwhile: the ISK joins it
+                newer.total_pool_isk += claim.gross_payout
+                newer.remaining_pool_isk += claim.gross_payout
+            else:  # reopen the pool the claim drained
+                bounty.status, bounty.depleted_at = "ACTIVE", None
+                bounty.remaining_pool_isk += claim.gross_payout
+        else:
+            bounty.remaining_pool_isk += claim.gross_payout
+        claim.status, claim.rejected_at, claim.rejected_by_character_id = "REJECTED", utcnow(), admin_character_id

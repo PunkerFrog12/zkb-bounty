@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import secrets
 from urllib.parse import urlencode
 
@@ -9,7 +10,7 @@ import httpx
 import jwt
 
 from .config import Settings
-from .killrules import KillDecision
+from .killrules import KillDecision, parse_time
 
 SSO_AUTHORIZE = "https://login.eveonline.com/v2/oauth/authorize"
 SSO_TOKEN = "https://login.eveonline.com/v2/oauth/token"
@@ -79,6 +80,19 @@ class EveClient:
             rows += self._esi("GET", f"/characters/{character_id}/wallet/journal/", access_token,
                               params={"page": page}).json()
         return rows
+
+    def hunter_ok(self, character_id: int, kill_time: dt.datetime) -> bool:
+        """Fresh-alt defence: old enough on the kill date and has a kill history on zKillboard."""
+        born = parse_time(self._esi("GET", f"/characters/{character_id}/").json()["birthday"])
+        if (kill_time - born).days < self.s.min_hunter_age_days:
+            return False
+        if self.s.min_hunter_kills <= 0:
+            return True
+        r = self.http.get(f"{self.s.zkb_api_base}/stats/characterID/{character_id}/kills/")
+        r.raise_for_status()
+        stats = r.json()
+        kills = int(stats.get("shipsDestroyed") or 0) if isinstance(stats, dict) else 0
+        return kills >= self.s.min_hunter_kills
 
     def verify_kill(self, d: KillDecision) -> bool:
         """Confirm the R2Z2 data against ESI's signed-by-hash killmail before paying."""

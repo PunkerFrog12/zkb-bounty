@@ -41,7 +41,7 @@ def killfeed_step(sm, settings: Settings, eve: EveClient) -> bool:
     if package is None:
         kv_set(sm, R2Z2_CURSOR, str(seq))
         return False
-    claim = ledger.process_killmail(sm, settings, package, verify=eve.verify_kill)
+    claim = ledger.process_killmail(sm, settings, package, verify=eve.verify_kill, hunter_ok=eve.hunter_ok)
     if claim:
         log.info("claim %s: kill %s pays %s ISK net to %s", claim.id, claim.killmail_id,
                  claim.net_payout, claim.killer_character_id)

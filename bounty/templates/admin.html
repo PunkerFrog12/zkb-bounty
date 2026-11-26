@@ -9,7 +9,8 @@
   <div class="col"><div class="card"><div class="card-body"><div class="small text-body-secondary">Host fees earned</div><div class="fs-4">{{ stats.fees | isk }}</div></div></div></div>
 </div>
 <p class="small text-body-secondary">The receiving character's wallet must hold at least owed + pools + balances.
-Send each payout in game with <em>Give Money</em> to the hunter, reason <code>CLAIM-&lt;id&gt;</code>; the wallet poller then marks it paid automatically, or use the button.</p>
+Every claim is held for {{ settings.claim_hold_hours }} hours first: check the kill, and reject it if it looks farmed (its ISK returns to the pool).
+After the hold, send each payout in game with <em>Give Money</em> to the hunter, reason <code>CLAIM-&lt;id&gt;</code>; the wallet poller then marks it paid automatically, or use the button.</p>
 
 <table class="table table-sm align-middle">
   <thead><tr><th>Claim</th><th>Target</th><th>Kill</th><th>Pay to</th><th class="text-end">Send (ISK)</th><th class="text-end">Fee kept</th><th></th></tr></thead>
@@ -22,8 +23,16 @@ Send each payout in game with <em>Give Money</em> to the hunter, reason <code>CL
       <td><a href="https://zkillboard.com/character/{{ c.killer_character_id }}/">{{ c.killer_character_id }}</a></td>
       <td class="text-end fw-bold">{{ c.net_payout | isk }}</td>
       <td class="text-end">{{ c.host_fee_isk | isk }}</td>
-      <td><form method="post" action="/admin/claims/{{ c.id }}/paid" onsubmit="return confirm('Mark CLAIM-{{ c.id }} as paid? Only do this after sending the ISK in game.')">
-        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn btn-sm btn-success">Mark paid</button></form></td>
+      <td class="d-flex gap-1">
+        {% if aware(c.payable_at) <= now %}
+        <form method="post" action="/admin/claims/{{ c.id }}/paid" onsubmit="return confirm('Mark CLAIM-{{ c.id }} as paid? Only do this after sending the ISK in game.')">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn btn-sm btn-success">Mark paid</button></form>
+        {% else %}
+        <span class="badge text-bg-warning">On hold until {{ aware(c.payable_at).strftime('%Y-%m-%d %H:%M') }} UTC</span>
+        {% endif %}
+        <form method="post" action="/admin/claims/{{ c.id }}/reject" onsubmit="return confirm('Reject CLAIM-{{ c.id }}? Its ISK goes back to the bounty pool.')">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn btn-sm btn-outline-danger">Reject</button></form>
+      </td>
     </tr>
   {% else %}
     <tr><td colspan="7">Nothing to pay.</td></tr>

@@ -10,8 +10,9 @@ A companion service that brings back player-funded bounties on zKillboard:
    **ESI wallet polling** credits it.
 3. The service follows zKillboard's **R2Z2** kill feed. When a target dies, it checks the kill
    against ESI and creates a claim for the hunter. The host keeps a **2.5% fee**.
-4. ESI cannot send ISK, so claims go to an **admin payout queue**. A human sends the ISK in game
-   and marks the claim paid, or the wallet poller sees the outgoing transfer and marks it paid.
+4. ESI cannot send ISK, so claims go to an **admin payout queue**. Each claim is held for 72 hours
+   so an admin can reject a farmed kill. After that, a human sends the ISK in game and marks the
+   claim paid, or the wallet poller sees the outgoing transfer and marks it paid.
 
 ## Native or companion? Companion.
 
@@ -69,8 +70,10 @@ follows the documented etiquette:
 |---|---|---|
 | Who is paid | **Final-blow** attacker. If that attacker isn't eligible (an NPC, for example), the eligible attacker with the most damage. If nobody is eligible, nobody is paid and the pool stays | One transfer per kill for the admin to send. Splitting payouts invites "tag the kill with 20 alts" |
 | Eligible attacker | A player character, not the victim, not in the victim's corp or alliance | Stops the cheapest alt/blue farming |
+| Fresh-alt check | The paid pilot must be at least **90 days old on the kill date** (ESI `birthday`) and have at least **10 kills on zKillboard**. If the final-blow pilot fails, the next eligible pilot by damage is tried | Blocks the classic exploit: the target makes a new alt in another corp, dies to it and collects their own bounty |
 | Never pays | NPC kills (`zkb.npc`), awox kills (`zkb.awox`), kills older than the pool | |
-| Amount per kill | `min(remaining pool, ISK destroyed × PAYOUT_RATIO_PERCENT/100)`, default 100% | Losing a 1M-ISK rookie ship can't drain a 10B pool. Set 20 to match CCP's in-game bounty rule (stronger against farming, slower payouts) |
+| Amount per kill | `min(remaining pool, ISK destroyed × PAYOUT_RATIO_PERCENT/100)`, default **20%** (CCP's in-game number) | Farming your own bounty becomes a losing trade: feed a 100M ship to your alt and get 19.5M back. Raise it toward 100% for faster payouts if abuse turns out to be rare |
+| Payout hold | Claims wait **72 hours** (`CLAIM_HOLD_HOURS`) before they can be marked paid. An admin can **reject** a claim during that time; its full ISK goes back to the pool (a drained pool reopens) | Gives humans a window to catch an old, active alt the automatic checks can't |
 | Host fee | 2.5% of gross, rounded half-up to whole ISK, `net = gross - fee` | `CHECK (gross = fee + net)` in the database |
 | Minimum bounty | 5,000,000 ISK; no maximum; whole ISK only; you can't place a bounty on yourself | |
 | Pools | One ACTIVE pool per target (partial unique index). When it reaches 0 it becomes DEPLETED, and the next contribution opens a new pool | |
@@ -97,6 +100,8 @@ Deposit amounts with cents are floored.
 
 * `place_bounty`: a conditional `UPDATE users SET wallet_balance = wallet_balance - x WHERE
   wallet_balance >= x`, plus `CHECK (wallet_balance >= 0)`, so a balance can't be spent twice.
+* Kills on characters without an active bounty are dropped before any network call, so the
+  fresh-alt check (one ESI and one zKillboard request per pilot tried) only runs for bounty kills.
 * `process_killmail`: `SELECT ... FOR UPDATE` on the active pool, a conditional decrement
   (`remaining_pool_isk >= gross`), and `INSERT` into `claims` with `killmail_id UNIQUE`, all in
   one transaction. If two workers race on the same kill, the loser hits the unique constraint and
@@ -147,7 +152,7 @@ character, apply `integration/9.wallet.php.patch`.
 python -m pytest -q
 ```
 
-There are 57 tests:
+There are 75 tests, and they pass on both SQLite and PostgreSQL 18:
 
 * fee math, including 10k random amounts and a 1T ISK case;
 * minimums, no maximum, whole-ISK only, no bounty on yourself, insufficient balance;
@@ -159,7 +164,10 @@ There are 57 tests:
 * ISK conservation;
 * payout queue and automatic reconciliation;
 * the web flow (SSO state check, CSRF, anonymous masking in HTML and JSON, admin-only queue);
-* the R2Z2 worker cursor, including a re-sent kill.
+* the R2Z2 worker cursor, including a re-sent kill;
+* the anti-farming defences: fresh-alt fallback to a veteran attacker, age measured on the kill
+  date, zKillboard kill history, the 20% cap, the 72-hour hold, and admin reject returning ISK to
+  the pool (including a drained pool reopening).
 
 By default the tests use SQLite. On SQLite every transaction takes the write lock at `BEGIN`
 (`BEGIN IMMEDIATE`), so writes run one at a time. To run the same suite, threaded race tests
@@ -185,6 +193,11 @@ schema.sql           Postgres DDL generated from the models
 
 ## Known limits / next steps
 
+* No defence makes farming impossible. A player with an old, active alt in another corp can still
+  claim their own bounty, but at 20% they lose most of every ship they feed it, and the 72-hour
+  hold gives the admin time to reject it.
+* No database migrations: the schema changed when the anti-farming fields were added, so an
+  existing database from the first version needs its `claims` table recreated.
 * Bounties don't expire, and unspent balances can't be withdrawn yet. Both would go through the
   same payout queue.
 * Payouts are manual by design (ESI has no "send ISK" endpoint). The admin page shows how much

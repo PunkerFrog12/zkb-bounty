@@ -5,6 +5,9 @@ Payout rule (documented in README):
   * NPC kills (zkb.npc) and awox kills (zkb.awox) never pay.
   * Eligible attackers are player characters that are not the victim and are not in
     the victim's corporation or alliance (blocks the cheapest alt/blue farming).
+  * Fresh-alt defence: an eligible attacker must also pass `hunter_ok` (in
+    production: character at least MIN_HUNTER_AGE_DAYS old on the kill date and
+    MIN_HUNTER_KILLS kills on zKillboard; see EveClient.hunter_ok).
   * The final-blow attacker is paid if eligible; otherwise the eligible attacker
     with the most damage done; otherwise nobody is paid and the pool stays intact.
   * One killmail pays one character. We deliberately do not split among attackers:
@@ -15,6 +18,10 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
+from typing import Callable
+
+# (character_id, killmail_time) -> may this character be paid for this kill?
+HunterCheck = Callable[[int, dt.datetime], bool]
 
 
 @dataclass(frozen=True)
@@ -32,7 +39,11 @@ def parse_time(raw: str) -> dt.datetime:
     return dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
 
 
-def decide(package: dict) -> KillDecision:
+def victim_id(package: dict) -> int:
+    return int(package["esi"]["victim"].get("character_id") or 0)
+
+
+def decide(package: dict, hunter_ok: HunterCheck | None = None) -> KillDecision:
     esi, zkb = package["esi"], package.get("zkb", {})
     victim = esi["victim"]
     victim_id = int(victim.get("character_id") or 0)
@@ -66,6 +77,11 @@ def decide(package: dict) -> KillDecision:
     candidates = [a for a in esi.get("attackers", []) if eligible(a)]
     if not candidates:
         return KillDecision(killer_character_id=None, reason="no eligible attacker", **base)
-    final = next((a for a in candidates if a.get("final_blow")), None)
-    chosen = final or max(candidates, key=lambda a: int(a.get("damage_done") or 0))
-    return KillDecision(killer_character_id=int(chosen["character_id"]), reason="ok", **base)
+    # Final blow first, then by damage. hunter_ok may call ESI/zKillboard, so it is
+    # checked lazily and stops at the first pilot who passes.
+    candidates.sort(key=lambda a: (not a.get("final_blow"), -int(a.get("damage_done") or 0)))
+    for a in candidates:
+        cid = int(a["character_id"])
+        if hunter_ok is None or hunter_ok(cid, base["killmail_time"]):
+            return KillDecision(killer_character_id=cid, reason="ok", **base)
+    return KillDecision(killer_character_id=None, reason="no attacker passed the hunter check", **base)

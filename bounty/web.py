@@ -186,7 +186,8 @@ def create_app(settings: Settings | None = None, sm=None, eve: EveClient | None 
                                   .where(Bounty.status == "ACTIVE")),
                 "balances": s.scalar(select(func.coalesce(func.sum(User.wallet_balance), 0))),
             }
-        return render(request, "admin.html", pending=pending, unmatched=unmatched, stats=stats)
+        return render(request, "admin.html", pending=pending, unmatched=unmatched, stats=stats,
+                      now=ledger.utcnow(), aware=ledger._aware)
 
     @app.post("/admin/claims/{claim_id}/paid")
     def admin_paid(request: Request, claim_id: int, csrf: str = Form("")):
@@ -194,6 +195,16 @@ def create_app(settings: Settings | None = None, sm=None, eve: EveClient | None 
         try:
             ledger.mark_paid(sm, claim_id, require_admin(request))
             msg = f"Claim {claim_id} marked paid."
+        except ledger.BountyError as e:
+            msg = str(e)
+        return redirect("/admin", msg, request)
+
+    @app.post("/admin/claims/{claim_id}/reject")
+    def admin_reject(request: Request, claim_id: int, csrf: str = Form("")):
+        check_csrf(request, csrf)
+        try:
+            ledger.reject_claim(sm, claim_id, require_admin(request))
+            msg = f"Claim {claim_id} rejected; its ISK went back to the pool."
         except ledger.BountyError as e:
             msg = str(e)
         return redirect("/admin", msg, request)

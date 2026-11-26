@@ -39,6 +39,9 @@ class FakeEve:
     def verify_kill(self, d):
         return True
 
+    def hunter_ok(self, cid, kill_time):
+        return True
+
     def r2z2_sequence(self):
         return 1
 
@@ -117,6 +120,21 @@ def test_admin_marks_claim_paid(client, sm, settings):
     assert f"CLAIM-{c.id}" in page and "97,500,000" in page
     client.post(f"/admin/claims/{c.id}/paid", data={"csrf": csrf(client, "/admin")})
     assert ledger.pending_payouts(sm) == []
+
+
+def test_admin_sees_hold_and_can_reject(sm, settings, eve):
+    from dataclasses import replace
+    held = replace(settings, claim_hold_hours=72)
+    client = TestClient(create_app(held, sm, eve), base_url="https://testserver")
+    fund(sm, held, ALICE, 100_000_000)
+    ledger.place_bounty(sm, held, ALICE, TARGET, "Evil Target", 100_000_000, False)
+    c = ledger.process_killmail(sm, held, killmail(2))
+    login(client, ADMIN)
+    page = client.get("/admin").text
+    assert "On hold until" in page and f"/admin/claims/{c.id}/paid" not in page
+    r = client.post(f"/admin/claims/{c.id}/reject", data={"csrf": csrf(client, "/admin")})
+    assert "went back to the pool" in r.text
+    assert client.get(f"/api/bounty/{TARGET}").json()["remaining_pool_isk"] == 100_000_000
 
 
 def test_receiving_character_login_stores_wallet_token(client, sm):

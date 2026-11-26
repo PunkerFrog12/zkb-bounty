@@ -18,8 +18,10 @@ TARGET, HUNTER, HUNTER2 = 2001, 3001, 3002
 
 @pytest.fixture
 def settings():
+    # Base tests pin ratio 100% and no hold so the money math is easy to read;
+    # test_antifarm.py covers the production defaults (20%, 72 h hold, hunter checks).
     return Settings(database_url="", receiving_character_id=RECEIVER, admin_character_ids=frozenset({ADMIN}),
-                    session_secret="test")
+                    session_secret="test", payout_ratio_percent=100, claim_hold_hours=0)
 
 
 @pytest.fixture
